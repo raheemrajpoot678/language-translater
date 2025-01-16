@@ -164,9 +164,7 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
 
         // Detecting the environment (production or development)
         const isProduction = process.env.NODE_ENV === "production";
-        const baseURL = isProduction
-          ? window.location.origin
-          : "http://localhost:3000";
+        const baseURL = "https://transletter.vercel.app"
 
         // Sign up user
         const { data: signUpData, error: signUpError } =
