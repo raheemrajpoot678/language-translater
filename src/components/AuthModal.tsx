@@ -173,7 +173,7 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
             password,
             options: {
               data: { username },
-              emailRedirectTo: `${baseURL}/auth/callback`, // Setting the correct redirect URL
+              emailRedirectTo: `https://transletter.vercel.app/auth/callback`, // Setting the correct redirect URL
             },
           });
 
