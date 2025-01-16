@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Loader, AlertCircle, Eye, EyeOff, Lock, Mail, User } from 'lucide-react';
+import { X, Loader, AlertCircle, Eye, EyeOff, Lock, Mail, User, CheckCircle } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { motion } from 'framer-motion';
 import { validatePassword, validateEmail } from '../utils/validation';
@@ -24,6 +24,8 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
   const [isLocked, setIsLocked] = useState(false);
   const [lockTimer, setLockTimer] = useState(0);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [justSignedUp, setJustSignedUp] = useState(false);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -48,6 +50,8 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
     setUsername('');
     setError(null);
     setSuccessMessage(null);
+    setVerificationSent(false);
+    setJustSignedUp(false);
   };
 
   const handleModalClose = () => {
@@ -55,31 +59,47 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
     onClose();
   };
 
-  const handleAuthError = (error: any) => {
-    let errorMessage = 'Authentication failed';
-    
-    if (error.message?.includes('Invalid login credentials')) {
-      errorMessage = 'Invalid email or password';
-    } else if (error.message?.includes('User already registered')) {
-      errorMessage = 'An account with this email already exists';
-    } else if (error.message?.includes('Password should be')) {
-      errorMessage = error.message;
-    } else if (error.message) {
-      errorMessage = error.message;
-    }
-
-    setError(errorMessage);
-    if (!isSignUp) {
-      setAttempts(prev => prev + 1);
+  const handleResendVerification = async () => {
+    try {
+      setIsLoading(true);
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email,
+      });
+      
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      
+      setSuccessMessage('Verification email has been resent. Please check your inbox.');
+      setError(null);
+    } catch (error: any) {
+      console.error('Error resending verification:', error);
+      setError(error.message || 'Failed to resend verification email');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const createProfile = async (userId: string, username: string) => {
-    const { error } = await supabase
-      .from('profiles')
-      .insert([{ id: userId, username, created_at: new Date().toISOString() }]);
-    
-    if (error) throw error;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .insert([{ id: userId, username, created_at: new Date().toISOString() }]);
+      
+      if (error) {
+        // If the error is about the profile already existing, we can ignore it
+        if (error.code === '23505' && error.message.includes('profiles_pkey')) {
+          return; // Profile already exists, which is fine
+        }
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error creating profile:', error);
+      // Don't throw the error, just log it and continue
+      // This way the sign-up process won't be interrupted
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -92,23 +112,28 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
 
     try {
       if (!validateEmail(email)) {
-        throw new Error('Please enter a valid email address');
+        setError('Please enter a valid email address');
+        return;
       }
 
       const passwordValidation = validatePassword(password);
       if (!passwordValidation.isValid) {
-        throw new Error(passwordValidation.message);
+        setError(passwordValidation.message);
+        return;
       }
 
       if (isSignUp) {
         if (password !== confirmPassword) {
-          throw new Error('Passwords do not match');
+          setError('Passwords do not match');
+          return;
         }
         if (!username.trim()) {
-          throw new Error('Username is required');
+          setError('Username is required');
+          return;
         }
         if (username.length < 3) {
-          throw new Error('Username must be at least 3 characters long');
+          setError('Username must be at least 3 characters long');
+          return;
         }
 
         // Check if username exists
@@ -119,7 +144,8 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
           .single();
 
         if (existingUser) {
-          throw new Error('Username already taken');
+          setError('Username already taken');
+          return;
         }
 
         // Sign up user
@@ -127,24 +153,42 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
           email,
           password,
           options: {
-            data: { username }
+            data: { username },
+            emailRedirectTo: `${window.location.origin}/auth/callback`
           }
         });
 
-        if (signUpError) throw signUpError;
-        if (!signUpData.user) throw new Error('Failed to create account');
+        if (signUpError) {
+          setError(signUpError.message);
+          return;
+        }
 
-        // Create profile
+        if (!signUpData.user) {
+          setError('Failed to create account');
+          return;
+        }
+
+        // Create profile - but don't let profile creation errors affect the signup flow
         await createProfile(signUpData.user.id, username);
+        
+        // Always set success message and update UI state
+        setError(null);
+        setJustSignedUp(true);
+        setVerificationSent(true);
+        setSuccessMessage('Account created successfully! Please check your email to verify your account.');
+        
+        // Clear form fields but keep email for convenience
+        setPassword('');
+        setConfirmPassword('');
+        setUsername('');
+        setIsSignUp(false); // Switch to sign in mode
 
-        setSuccessMessage('Account created successfully!');
-        onAuthSuccess(signUpData.user);
-        handleModalClose();
       } else {
         if (attempts >= 4) {
           setIsLocked(true);
           setLockTimer(300); // 5 minutes
-          throw new Error('Too many failed attempts. Try again in 5 minutes.');
+          setError('Too many failed attempts. Try again in 5 minutes.');
+          return;
         }
 
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -152,8 +196,24 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
           password,
         });
 
-        if (signInError) throw signInError;
-        if (!signInData.user) throw new Error('Failed to sign in');
+        if (signInError) {
+          setError(signInError.message);
+          setAttempts(prev => prev + 1);
+          return;
+        }
+
+        if (!signInData.user) {
+          setError('Failed to sign in');
+          setAttempts(prev => prev + 1);
+          return;
+        }
+
+        // Check if email is verified
+        if (!signInData.user.email_confirmed_at) {
+          setVerificationSent(true);
+          setError('Please verify your email address before signing in. Check your inbox for the verification link.');
+          return;
+        }
 
         if (rememberMe) {
           localStorage.setItem('rememberMe', 'true');
@@ -164,12 +224,17 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
         }
 
         setAttempts(0);
+        setError(null);
+        setSuccessMessage('Successfully signed in!');
         onAuthSuccess(signInData.user);
         handleModalClose();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Auth error:', error);
-      handleAuthError(error);
+      setError(error.message || 'Authentication failed');
+      if (!isSignUp) {
+        setAttempts(prev => prev + 1);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -209,14 +274,46 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
             {isSignUp ? 'Create Account' : 'Welcome Back'}
           </h2>
 
-          {error && (
+          {(verificationSent || justSignedUp) && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md"
+            >
+              <h3 className="text-sm font-medium text-blue-800 mb-2">Verify your email</h3>
+              <p className="text-sm text-blue-600 mb-3">
+                We've sent a verification link to <strong>{email}</strong>. Please check your inbox and click
+                the link to verify your account.
+              </p>
+              <button
+                onClick={handleResendVerification}
+                className="text-sm text-blue-800 hover:text-blue-900 font-medium"
+                disabled={isLoading}
+              >
+                Didn't receive the email? Click here to resend
+              </button>
+            </motion.div>
+          )}
+
+          {error && !justSignedUp && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center gap-2 text-red-600"
             >
               <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <p className="text-sm">{error}</p>
+              <div className="flex-1">
+                <p className="text-sm">{error}</p>
+                {error.includes('verify your email') && (
+                  <button
+                    onClick={handleResendVerification}
+                    className="mt-2 text-sm font-medium hover:text-red-800"
+                    disabled={isLoading}
+                  >
+                    Resend verification email
+                  </button>
+                )}
+              </div>
             </motion.div>
           )}
 
@@ -226,7 +323,7 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
               animate={{ opacity: 1, y: 0 }}
               className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-center gap-2 text-green-600"
             >
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <CheckCircle className="w-5 h-5 flex-shrink-0" />
               <p className="text-sm">{successMessage}</p>
             </motion.div>
           )}
