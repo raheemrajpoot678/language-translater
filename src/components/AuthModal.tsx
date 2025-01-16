@@ -154,7 +154,8 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalProps) {
           password,
           options: {
             data: { username },
-            emailRedirectTo: `${window.location.origin}/auth/callback`
+            emailRedirectTo: process.env.NEXT_PUBLIC_REDIRECT_URL || `${window.location.origin}/auth/callback`
+
           }
         });
 
