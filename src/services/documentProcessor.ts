@@ -81,22 +81,22 @@ export async function processDocument(
       text_hash: textHash
     };
 
-    const { data: savedDoc, error: saveError } = await supabase
-      .from('documents')
-      .insert([docData])
-      .select()
-      .single();
+    // const { data: savedDoc, error: saveError } = await supabase
+    //   .from('documents')
+    //   .insert([docData])
+    //   .select()
+    //   .single();
 
-    if (saveError) {
-      throw saveError;
-    }
+    // if (saveError) {
+    //   throw saveError;
+    // }
 
     return {
       originalText: text,
       translatedText,
       analysisResult,
       confidenceScore: 0.8,
-      documentId: savedDoc.id
+      // documentId: savedDoc.id
     };
   } catch (error) {
     console.error('Document processing error:', error);
